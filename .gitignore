@@ -1,0 +1,29 @@
+.gradle/
+.kotlin/
+.idea/
+**/build/
+local.properties
+*.iml
+.DS_Store
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+.env*
+!*.example
+*signing*.properties
+*.apk
+*.aab
+captures/
+
+# Claude-local instructions, notes and workspace metadata (at any depth).
+**/.claude/
+*[Cc][Ll][Aa][Uu][Dd][Ee]*.[Mm][Dd]
+*[Cc][Ll][Aa][Uu][Dd][Ee]*.[Mm][Aa][Rr][Kk][Dd][Oo][Ww][Nn]
+**/[Cc][Ll][Aa][Uu][Dd][Ee]*/**/*.[Mm][Dd]
+**/[Cc][Ll][Aa][Uu][Dd][Ee]*/**/*.[Mm][Aa][Rr][Kk][Dd][Oo][Ww][Nn]
+
+# Private certificates and local release staging.
+*.pfx
+release-staging/
