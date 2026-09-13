@@ -20,15 +20,16 @@ object DjiCommands {
 }
 data class CameraStatus(
     val mode: Int, val state: Int, val seconds: Int, val remainingSeconds: Long,
-    val sleeping: Boolean, val temperature: Int, val battery: Int?
+    val sleeping: Boolean, val temperature: Int, val battery: Int?, val complete: Boolean = true
 ) {
     val recording get() = state == 3 && mode in DjiCommands.videoModes
-    val canStart get() = mode in DjiCommands.videoModes && state in setOf(0, 1, 5) &&
+    val canStart get() = complete && mode in DjiCommands.videoModes && state in setOf(0, 1, 5) &&
         !sleeping && temperature < 2 && remainingSeconds > 0
     companion object {
         fun parse(payload: ByteArray): CameraStatus? {
-            // Refuse short/unknown layouts rather than interpreting arbitrary trailing bytes.
-            if (payload.size < 38 || payload.u8(1) !in setOf(0, 1, 2, 3, 5)) return null
+            // The common 7-byte prefix can report recording even when extended health fields are omitted.
+            if (payload.size < 7 || payload.u8(1) !in setOf(0, 1, 2, 3, 5)) return null
+            if (payload.size < 38) return CameraStatus(payload.u8(0), payload.u8(1), payload.u16(5), 0, false, 0, null, complete = false)
             return CameraStatus(payload.u8(0), payload.u8(1), payload.u16(5),
                 payload.i32(23).toLong() and 0xffffffffL, payload.u8(28) == 3,
                 payload.u8(30), payload.u8(37).takeIf { it <= 100 })

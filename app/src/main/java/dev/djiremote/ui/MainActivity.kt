@@ -51,6 +51,7 @@ private val Ink = Color(0xff28161a)
 
 class MainActivity : ComponentActivity() {
     private val app get() = application as RemoteApp
+    private var exposureConfirmation by mutableStateOf<ExposurePreset?>(null)
     private var learning by mutableStateOf(false)
     private var learned by mutableStateOf<Int?>(null)
     private var localMessage by mutableStateOf<String?>(null)
@@ -134,6 +135,15 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        exposureConfirmation?.let { preset ->
+            AlertDialog(onDismissRequest = { exposureConfirmation = null }, title = { Text("Apply manual exposure?") },
+                text = { Text("Set ${preset.shutterLabel} and ISO ${preset.iso} on all ${remote.cameras.size} cameras? This switches them to manual exposure. Changes can partly succeed; verify every camera. Recording must be stopped.") },
+                confirmButton = { TextButton(onClick = {
+                    try { RemoteService.sendExposure(this@MainActivity, preset) }
+                    catch (_: Exception) { localMessage = "Couldn't start exposure apply. Check Bluetooth and retry." }
+                    exposureConfirmation = null
+                }) { Text("Apply to all") } }, dismissButton = { TextButton(onClick = { exposureConfirmation = null }) { Text("Cancel") } })
+        }
         if (endConfirmation) AlertDialog(onDismissRequest = { endConfirmation = false }, icon = { Glyph(R.drawable.ic_disconnect, null, Coral) },
             title = { Text("End this session?") }, text = { Text("Disconnecting does not stop the cameras. Stop your take first, or check each camera manually.") },
             confirmButton = { TextButton(onClick = { command(RemoteService.END); endConfirmation = false }) { Text("Disconnect") } },
@@ -178,7 +188,8 @@ class MainActivity : ComponentActivity() {
         }
         if (settings.experimentalExposure) ExposureWheels(settings.exposurePreset,
             onShutter = { lifecycleScope.launch { app.repository.stageShutter(it) } },
-            onIso = { lifecycleScope.launch { app.repository.stageIso(it) } })
+            onIso = { lifecycleScope.launch { app.repository.stageIso(it) } }, remote = remote,
+            onRead = { command(RemoteService.READ_EXPOSURE) }, onApply = { exposureConfirmation = settings.exposurePreset })
         if (remote.active && remote.cameras.any { it.uncertain }) Notice("Some camera states are unverified. Check the group before your take.")
         if (remote.cameras.isNotEmpty()) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -307,11 +318,12 @@ class MainActivity : ComponentActivity() {
             SettingSwitch("Show global control wheels", settings.experimentalExposure) { value ->
                 lifecycleScope.launch { app.repository.experimentalExposure(value) }
             }
-            Text("Choose a shutter speed and ISO preset for the group. Saved locally only; Bluetooth setting commands and readback are not verified.", color = Muted, fontSize = 12.sp)
+            Text("Experimental Action 4 Bluetooth controls. Read support first; Apply sends manual shutter/ISO commands and checks camera readback. Other camera models are blocked.", color = Muted, fontSize = 12.sp)
         }
         if (settings.experimentalExposure) ExposureWheels(settings.exposurePreset,
             onShutter = { lifecycleScope.launch { app.repository.stageShutter(it) } },
-            onIso = { lifecycleScope.launch { app.repository.stageIso(it) } })
+            onIso = { lifecycleScope.launch { app.repository.stageIso(it) } }, remote = remote,
+            onRead = { command(RemoteService.READ_EXPOSURE) }, onApply = { exposureConfirmation = settings.exposurePreset })
         Section("App info", R.drawable.ic_info) {
             Text("DJI Multi Remote", fontWeight = FontWeight.Bold)
             Text("Version ${BuildConfig.VERSION_NAME}", color = Coral)

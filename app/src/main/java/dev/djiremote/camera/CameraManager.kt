@@ -19,6 +19,7 @@ class CameraManager(private val app: RemoteApp, private val scope: CoroutineScop
     private var settings = app.settings.value
     private var active = false
     private var busy = false
+    private var operationLabel: String? = null
     private var message: String? = null
     private val operation = Mutex()
     fun start() {
@@ -121,6 +122,27 @@ class CameraManager(private val app: RemoteApp, private val scope: CoroutineScop
             }
         }
     }
+    fun exposure(preset: ExposurePreset? = null) {
+        if (operation.isLocked) return
+        scope.launch {
+            operation.withLock {
+                if (!app.remote.value.canCheckExposure || sessions.size != settings.cameras.size) {
+                    message = "Exposure requires every saved camera to be an idle, connected Action 4. No settings sent."
+                    publish(); return@withLock
+                }
+                busy = true; message = null; operationLabel = "Checking exposure…"; publish()
+                try {
+                    val targets = settings.cameras.map { sessions.getValue(it.address) }
+                    // All read-only preflights complete before ANY setting writes.
+                    message = when (ExposureBatch.run(targets, preset) { operationLabel = "Applying exposure…"; publish() }) {
+                        ExposureOutcome.READ_FAILED -> "Exposure queries failed on one or more cameras. No settings written."
+                        ExposureOutcome.PARTIAL -> "Exposure only partly confirmed. Check each camera; no automatic retry."
+                        else -> null // per-camera readback is the confirmation surface
+                    }
+                } finally { busy = false; operationLabel = null; publish() }
+            }
+        }
+    }
     fun toggle() {
         // Unknown status never means “not recording”; prefer explicit Stop over an unsafe start.
         command(!app.remote.value.shouldStop)
@@ -128,7 +150,7 @@ class CameraManager(private val app: RemoteApp, private val scope: CoroutineScop
     private fun publish() {
         app.remote.value = RemoteState(active, settings.cameras.map { camera ->
             (rows[camera.address] ?: CameraState(camera.address, camera.name)).copy(name = camera.name)
-        }, scanner.scanning.value, settings.partial, busy, message)
+        }, scanner.scanning.value, settings.partial, busy, message, operationLabel)
     }
     fun close() {
         active = false

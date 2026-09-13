@@ -18,14 +18,16 @@ class CameraSession(
     private val identity: ControllerIdentity, private val index: Int,
     private val onChange: (CameraState) -> Unit, private val log: (String) -> Unit,
     private val clock: () -> Long = SystemClock::elapsedRealtime,
-) {
+) : ExposureTarget {
     val state = MutableStateFlow(CameraState(known.address, known.name))
+    private val exposureClient = ExposureClient(client)
     private var sequence = SecureRandom().nextInt(65535)
     private val handshake = CompletableDeferred<DjiProtocol.Frame>()
     private var reader: Job? = null
     private var poller: Job? = null
     private val commandLock = Mutex()
     private var lastStatusAt = 0L
+    private var lastFullStatusAt = 0L
     private var statusVersion = 0L
     private var recordSequence: Int? = null
     private var recordFailure: String? = null
@@ -41,9 +43,12 @@ class CameraSession(
         client.connect(known.address)
         log("GATT_CONNECTED")
         reader = scope.launch {
-            val decoder = DjiProtocol.StreamDecoder()
+            val decoder = CameraPacketDecoder()
             for (chunk in client.notifications) {
-                for (frame in decoder.accept(chunk)) receive(frame)
+                for (packet in decoder.accept(chunk)) when (packet) {
+                    is CameraPacket.Rsdk -> receive(packet.frame)
+                    is CameraPacket.Duml -> exposureClient.receive(packet.frame)
+                }
             }
         }
         val code = SecureRandom().nextInt(10_000)
@@ -61,7 +66,7 @@ class CameraSession(
         val model = approval.payload.i32(0)
         if (model !in DjiCommands.supportedModels) throw UnsupportedCamera()
         send(0, 0x19, DjiCommands.pairAck(identity.id, index), type = 0x20, seq = approval.sequence)
-        update { it.copy(connection = ConnectionState.READY, sessionReady = true, pairingCode = null) }
+        update { it.copy(connection = ConnectionState.READY, sessionReady = true, pairingCode = null, modelId = model) }
         log("PAIR_SUCCESS")
         send(0x1d, 5, DjiCommands.subscribe(), type = 0)
         poller = scope.launch {
@@ -69,7 +74,7 @@ class CameraSession(
                 delay(1500)
                 val age = clock() - lastStatusAt
                 if (age > 3500 && state.value.statusFresh) update { it.copy(statusFresh = false) }
-                if (age > 2000) {
+                if (age > 2000 || clock() - lastFullStatusAt > 3500) {
                     try { send(0x1d, 5, DjiCommands.subscribe(), type = 0) }
                     catch (e: CancellationException) { throw e }
                     catch (_: Exception) { client.close(); break }
@@ -83,9 +88,10 @@ class CameraSession(
             else if (frame.response && frame.sequence == pairSequence && frame.payload.size >= 5 && frame.payload.u8(4) != 0)
                 handshake.completeExceptionally(PairingRejected())
         }
-        if (frame.set == 0x1d && frame.id == 2 && !frame.response && state.value.sessionReady) {
+        if (frame.set == 0x1d && frame.id == 2 && state.value.sessionReady) {
             val status = CameraStatus.parse(frame.payload) ?: return
             lastStatusAt = clock(); statusVersion++
+            if (status.complete) lastFullStatusAt = lastStatusAt
             update { it.copy(status = status, statusFresh = true, reportVersion = statusVersion) }
         }
         if (frame.set == 0x1d && frame.id == 6 && !frame.response && state.value.sessionReady && !state.value.statusFresh) {
@@ -134,9 +140,49 @@ class CameraSession(
             log("PROTOCOL_ERROR"); false
         } finally { recordSequence = null }
     }
+    private fun checkExposureIdle() {
+        check(state.value.canCheckExposure && clock() - lastStatusAt <= 3500) { "Exposure requires a connected, freshly confirmed idle Action 4" }
+    }
+    override suspend fun readExposure(): Boolean = commandLock.withLock {
+        try {
+            checkExposureIdle()
+            update { it.copy(exposureMessage = "Reading camera settings…", exposureSupported = false) }
+            val value = exposureClient.read()
+            update { it.copy(exposure = value, exposureSupported = true, exposureMessage = "Camera read: ${value.shutter.label} · ISO ${value.isoLabel}") }
+            log("EXPOSURE_READ_CONFIRMED"); true
+        } catch (e: CancellationException) {
+            if (e !is TimeoutCancellationException) throw e
+            update { it.copy(exposureSupported = false, exposureMessage = "No setting-query response on this BLE session. No settings written.") }
+            log("EXPOSURE_READ_TIMEOUT"); false
+        } catch (e: Exception) {
+            val reason = if (e is ExposureCommandRejected) e.message + ". No settings written." else "Setting replies unsupported, or camera not idle. No settings written."
+            update { it.copy(exposureSupported = false, exposureMessage = reason) }
+            log("EXPOSURE_READ_FAILED"); false
+        }
+    }
+    override suspend fun applyExposure(preset: ExposurePreset): Boolean = commandLock.withLock {
+        var writesStarted = false
+        try {
+            checkExposureIdle()
+            check(state.value.exposureSupported) { "Read camera settings first" }
+            ExposureCommands.iso(preset)
+            update { it.copy(exposureMessage = "Applying manual shutter / ISO…") }
+            val actual = exposureClient.apply(preset, state.value.exposure) { checkExposureIdle(); writesStarted = true }
+            update { it.copy(exposure = actual, exposureMessage = "Camera confirmed: ${actual.shutter.label} · ISO ${actual.isoLabel}") }
+            log("EXPOSURE_APPLIED_CONFIRMED"); true
+        } catch (e: CancellationException) {
+            if (e !is TimeoutCancellationException) throw e
+            update { it.copy(exposureSupported = false, exposureMessage = if (writesStarted) "Apply timed out: settings may be partially changed. Read camera / check screen." else "No settings written; camera no longer ready.") }
+            log("EXPOSURE_APPLY_TIMEOUT"); false
+        } catch (e: Exception) {
+            val reason = (e as? ExposureCommandRejected)?.message ?: "Apply rejected or readback differs"
+            update { it.copy(exposureSupported = false, exposureMessage = if (writesStarted) "$reason. Some settings may have changed; check camera." else "No settings written; read support / idle check failed.") }
+            log("EXPOSURE_APPLY_FAILED"); false
+        }
+    }
     suspend fun awaitDisconnect() { client.disconnected.await() }
     fun close() {
-        poller?.cancel(); reader?.cancel(); client.close()
-        update { it.copy(connection = ConnectionState.OFFLINE, sessionReady = false, statusFresh = false, pending = null, pairingCode = null) }
+        poller?.cancel(); reader?.cancel(); exposureClient.close(); client.close()
+        update { it.copy(connection = ConnectionState.OFFLINE, sessionReady = false, statusFresh = false, pending = null, pairingCode = null, exposureSupported = false, exposureMessage = "Disconnected — settings unverified") }
     }
 }

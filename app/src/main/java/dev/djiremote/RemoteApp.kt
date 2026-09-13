@@ -11,6 +11,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
 class RemoteApp : Application() {
+    val widgetProcessToken: String = java.util.UUID.randomUUID().toString()
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     lateinit var repository: CameraRepository
         private set

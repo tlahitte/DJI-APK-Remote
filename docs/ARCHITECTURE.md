@@ -25,3 +25,9 @@ Group and individual commands share the same operation mutex. An explicit select
 Freshly confirmed idle Stop is a no-op; a monotonically increasing report revision ensures repeated identical status notifications can still wake a confirmation waiter. Stale/unknown status never takes the no-op shortcut.
 
 Experimental exposure wheels persist a local preset only, without calling the service/manager/transport. Modern Android notification permission is deliberately absent; foreground-service registration remains mandatory and visible in Active apps.
+
+## 0.3 additions
+
+Widget rendering now consumes a serialized persisted aggregate snapshot, not a live service Flow inside Glance. A per-process token and elapsed-time age guard reject stale snapshots; writes re-read the latest service state to avoid older queued OFF snapshots overwriting a newer state. A five-second service heartbeat complements immediate change updates. Record and Stop remain separate controls.
+
+ExposureBatch performs all read-only preflights before setting writes, and dispatches independent per-camera apply operations in parallel. ExposureClient shares each camera's serialized transport but has separate DUML sequence/command matching. The combined stream decoder demultiplexes R-SDK and DUML without scanning inside payloads. Only getter readback matching the chosen manual shutter and ISO is reported as confirmed. Frame encoding research is not a guarantee of Action 4 firmware support.

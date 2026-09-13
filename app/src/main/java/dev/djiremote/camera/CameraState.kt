@@ -1,6 +1,7 @@
 package dev.djiremote.camera
 
 import dev.djiremote.protocol.CameraStatus
+import dev.djiremote.protocol.ExposureReadback
 
 enum class ConnectionState { OFFLINE, CONNECTING, PAIRING, READY, RECONNECTING, ERROR, REJECTED }
 data class CameraState(
@@ -10,9 +11,14 @@ data class CameraState(
     val error: String? = null, val pairingCode: Int? = null,
     val sentAtMs: Long? = null, val confirmedAtMs: Long? = null,
     val reportVersion: Long = 0,
+    val modelId: Int? = null,
+    val exposure: ExposureReadback? = null,
+    val exposureMessage: String = "Not checked",
+    val exposureSupported: Boolean = false,
 ) {
     val recording get() = statusFresh && status?.recording == true
     val confirmedIdle get() = sessionReady && statusFresh && pending == null && status?.state in setOf(0, 1, 2, 5)
+    val canCheckExposure get() = modelId == 0xff33 && confirmedIdle && status?.mode in dev.djiremote.protocol.DjiCommands.videoModes
     val possiblyRecording get() = recording || pending == true || (!statusFresh && status?.recording == true)
     val ready get() = sessionReady && statusFresh && status?.canStart == true && pending == null
     val uncertain get() = !statusFresh || pending != null
@@ -32,7 +38,10 @@ data class RemoteState(
     val active: Boolean = false, val cameras: List<CameraState> = emptyList(),
     val scanning: Boolean = false, val partialAllowed: Boolean = false,
     val busy: Boolean = false, val message: String? = null,
+    val operationLabel: String? = null,
 ) {
+    val canCheckExposure get() = active && !busy && cameras.isNotEmpty() && cameras.all { it.canCheckExposure }
+    val canApplyExposure get() = canCheckExposure && cameras.all { it.exposureSupported }
     val readyCount get() = cameras.count { it.ready }
     val recordingCount get() = cameras.count { it.recording }
     val canRecord get() = active && !busy && cameras.isNotEmpty() &&

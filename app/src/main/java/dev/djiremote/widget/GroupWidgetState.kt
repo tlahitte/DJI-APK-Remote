@@ -19,7 +19,7 @@ data class GroupWidgetState(
             val enabled = if (action == GroupAction.STOP) s.canStop else s.canRecord
             val errors = s.message != null || s.cameras.any { it.error != null || it.connection in setOf(ConnectionState.ERROR, ConnectionState.REJECTED) }
             val title = when {
-                s.busy -> if (s.cameras.any { it.pending == true }) "Starting take…" else "Stopping…"
+                s.busy -> s.operationLabel ?: if (s.cameras.any { it.pending == true }) "Starting take…" else "Stopping…"
                 recording > 0 -> if (recording == total) "All cameras recording" else "Partial recording"
                 s.hasRecordingActivity -> "Recording status unknown"
                 total == 0 -> "No cameras added"

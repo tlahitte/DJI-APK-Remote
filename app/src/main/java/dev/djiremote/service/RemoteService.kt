@@ -13,6 +13,7 @@ import dev.djiremote.R
 import dev.djiremote.RemoteApp
 import dev.djiremote.ble.BlePermissions
 import dev.djiremote.camera.CameraManager
+import dev.djiremote.camera.ExposurePreset
 import dev.djiremote.ui.MainActivity
 import dev.djiremote.widget.GroupWidgetState
 import dev.djiremote.widget.RemoteWidget
@@ -45,13 +46,13 @@ class RemoteService : Service() {
                         // Android 13+ deliberately has no notification permission: only the required
                         // system Active apps indicator remains. Older versions need a quiet notification.
                         if (Build.VERSION.SDK_INT < 33) getSystemService(NotificationManager::class.java).notify(1, notification())
-                        runCatching { RemoteWidget.refresh(this@RemoteService, app.remote.value) }
+                        runCatching { RemoteWidget.refresh(this@RemoteService, app.remote.value) }.onFailure { app.log("WIDGET_UPDATE_FAILED") }
                     }
             }
             scope.launch {
                 while (isActive) {
-                    delay(15_000)
-                    runCatching { RemoteWidget.refresh(this@RemoteService, app.remote.value) }
+                    delay(5_000)
+                    runCatching { RemoteWidget.refresh(this@RemoteService, app.remote.value) }.onFailure { app.log("WIDGET_UPDATE_FAILED") }
                 }
             }
             scope.launch { app.settings.map { it.mediaEnabled }.distinctUntilChanged().collect { enabled ->
@@ -67,6 +68,11 @@ class RemoteService : Service() {
             STOP -> manager.command(false)
             RECORD_ONE, STOP_ONE -> intent.getStringExtra(CAMERA_ID)?.let {
                 manager.command(intent.action == RECORD_ONE, it)
+            }
+            READ_EXPOSURE -> manager.exposure()
+            APPLY_EXPOSURE -> {
+                val shutter = intent.getIntExtra("shutter", -1); val iso = intent.getIntExtra("iso", -1)
+                if (shutter in ExposurePreset.shutterDenominators && iso in ExposurePreset.isoValues) manager.exposure(ExposurePreset(shutter, iso))
             }
             TOGGLE -> manager.toggle()
             END -> { stopSelf(); return START_NOT_STICKY }
@@ -106,7 +112,7 @@ class RemoteService : Service() {
     override fun onDestroy() {
         manager.close(); media?.release(); scope.cancel()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        app.scope.launch { runCatching { RemoteWidget.refresh(this@RemoteService, app.remote.value) } }
+        app.scope.launch { runCatching { RemoteWidget.refresh(this@RemoteService, app.remote.value) }.onFailure { app.log("WIDGET_UPDATE_FAILED") } }
         super.onDestroy()
     }
     override fun onBind(intent: Intent?): IBinder? = null
@@ -120,6 +126,12 @@ class RemoteService : Service() {
         const val RECORD_ONE = "dev.djiremote.RECORD_ONE"
         const val STOP_ONE = "dev.djiremote.STOP_ONE"
         private const val CAMERA_ID = "camera_id"
+        const val READ_EXPOSURE = "dev.djiremote.READ_EXPOSURE"
+        const val APPLY_EXPOSURE = "dev.djiremote.APPLY_EXPOSURE"
+        fun sendExposure(context: Context, preset: ExposurePreset) {
+            context.startForegroundService(Intent(context, RemoteService::class.java).setAction(APPLY_EXPOSURE)
+                .putExtra("shutter", preset.shutterDenominator).putExtra("iso", preset.iso))
+        }
         const val TOGGLE = "dev.djiremote.TOGGLE"
         const val END = "dev.djiremote.END"
         fun send(context: Context, action: String, cameraId: String? = null) {

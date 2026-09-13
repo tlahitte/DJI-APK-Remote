@@ -37,7 +37,7 @@ class ReadinessTest {
     @Test fun recordingOneCameraPreventsAnotherRecordAll() {
         assertFalse(RemoteState(active = true, cameras = listOf(camera(), camera("b").copy(status = status(3))), partialAllowed = true).canRecord)
     }
-    @Test fun shortStatusRejected() { for (size in 0..37) assertNull(CameraStatus.parse(ByteArray(size))) }
+    @Test fun shortStatusRejected() { for (size in 0..6) assertNull(CameraStatus.parse(ByteArray(size))) }
     @Test fun batteryUsesDocumentedOffsetNotLastByte() {
         val p = ByteArray(44); p[0] = 1; p[1] = 1; p[37] = 80; p[43] = 20
         assertEquals(80, CameraStatus.parse(p)?.battery)

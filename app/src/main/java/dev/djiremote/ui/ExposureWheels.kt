@@ -18,23 +18,35 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.djiremote.camera.ExposurePreset
+import dev.djiremote.camera.RemoteState
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
-@Composable fun ExposureWheels(preset: ExposurePreset, onShutter: (Int) -> Unit, onIso: (Int) -> Unit) {
+@Composable fun ExposureWheels(preset: ExposurePreset, onShutter: (Int) -> Unit, onIso: (Int) -> Unit,
+    remote: RemoteState, onRead: () -> Unit, onApply: () -> Unit) {
     val accent = Color(0xffFF5D64)
     Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = Color(0xff1b2532)),
         border = BorderStroke(1.dp, accent.copy(alpha = .4f))) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("EXPERIMENTAL · GLOBAL PRESET", color = accent, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Text("EXPERIMENTAL · ACTION 4 CONTROLS", color = accent, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Wheel("Shutter speed", ExposurePreset.shutterDenominators, preset.shutterDenominator, { "1/$it" }, onShutter, Modifier.weight(1f))
                 Wheel("ISO", ExposurePreset.isoValues, preset.iso, { it.toString() }, onIso, Modifier.weight(1f))
             }
-            Text("Not sent to cameras", color = Color(0xffffca87), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-            Text("Saved on this phone. Experimental choices—not confirmed camera settings. Availability depends on firmware and frame rate.",
+            Text("Desired settings · not sent until Apply", color = Color(0xffffca87), fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(onClick = onRead, enabled = remote.canCheckExposure, modifier = Modifier.weight(1f)) { Text("Read cameras") }
+                Button(onClick = onApply, enabled = remote.canApplyExposure, modifier = Modifier.weight(1f)) { Text("Apply to all") }
+            }
+            Text("First read the cameras, then Apply. Action 4 video modes only; cameras must be idle. Apply switches to manual exposure and requires matching readback. Firmware support is experimental.",
                 color = Color(0xffadbdcf), fontSize = 11.sp)
+            remote.cameras.forEach { camera ->
+                HorizontalDivider(color = Color(0xff344152))
+                Text(camera.name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text(camera.exposureMessage, fontSize = 12.sp, color = Color(0xffadbdcf))
+                camera.exposure?.let { actual -> Text("Last read: ${actual.shutter.label} · ISO ${actual.isoLabel}", fontSize = 12.sp, color = accent) }
+            }
         }
     }
 }

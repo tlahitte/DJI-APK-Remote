@@ -162,4 +162,16 @@ class CameraSessionTest {
         assertTrue(op.await()); assertNull(s.state.value.error); s.close()
     }
 
+    @Test fun responseFlaggedNumericStatusIsAccepted() = runTest {
+        val t = FakeTransport(); val s = session(t); s.connect(); runCurrent()
+        val p = ByteArray(38); p[0] = 1; p[1] = 3; p[23] = 100
+        t.emit(DjiProtocol.Frame(30, 0x20, 0x1d, 2, p)); runCurrent()
+        assertTrue(s.state.value.recording); s.close()
+    }
+    @Test fun shortRecordingPushIsAccepted() = runTest {
+        val t = FakeTransport(); val s = session(t); s.connect(); runCurrent()
+        t.emit(DjiProtocol.Frame(30, 0, 0x1d, 2, byteArrayOf(1,3,0,0,0,4,0))); runCurrent()
+        assertTrue(s.state.value.recording); assertEquals(4,s.state.value.status?.seconds); s.close()
+    }
+
 }

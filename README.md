@@ -1,34 +1,34 @@
 # DJI Multi Remote
 
-**0.2.0-preview · Native Android · Kotlin / Compose / Glance**
+**0.3.0-preview · Native Android · Kotlin / Compose / Glance**
 
 A small Bluetooth remote for a group of DJI cameras: connect once, record together, or trigger a single camera. The app uses the supplied coral icon and a dark navy / **#FF5D64** interface.
 
-> **Engineering preview:** camera compatibility, inter-camera timing and filming reliability still need physical-camera validation. Exposure/ISO wheels are **local presets only**—they do not change camera settings. No >99% reliability or frame-synchronization claim is made.
+> **Engineering preview:** camera compatibility, inter-camera timing and filming reliability still need physical-camera validation. Experimental Action 4 exposure controls now send actual commands only after read-only queries succeed; physical Action 4 compatibility is not yet validated. No >99% reliability or frame-synchronization claim is made.
 
-## What's in 0.2
+## What's in 0.3
 
 - **Group controls:** Record All / Stop All, concurrent per-camera dispatch, and camera-reported confirmation.
 - **Individual controls:** record or stop one linked camera without triggering the others.
 - **Safe readiness:** group Record requires every saved camera ready by default; partial recording is an explicit option. Per-camera controls require only that camera ready.
-- **4×1 widget:** one row, four columns. A single left-side button changes from Connect to Record to Stop; aggregate group status sits on the right. The widget turns coral when cameras report recording. Tap elsewhere to open the app.
+- **4×2 widget:** your banner, an undistorted square logo, clear DJI Multi Remote branding and separate Record / Stop controls throughout an active session. Group status comes from a persisted Glance snapshot, updated on changes and every five seconds. Tap the rest of the widget to open the app. Legacy small widgets use a compact layout; re-add to adopt 4×2.
 - **Cleaner app:** icon-based Remote, Cameras, Button and Settings tabs. Widget pinning, diagnostics, version/info and the privacy statement live in Settings.
 - **Volume Up default:** common shutter remotes work while the app is focused. Custom key learning and optional media-button routing are available.
 - **Idempotent Stop:** a camera freshly confirmed idle is already stopped; no redundant command or false confirmation timeout. Identical status reports can also complete an awaiting command.
 - **Quiet background operation:** Android 13+ has no notification-permission prompt or ordinary session notification; the required Android **Active apps** entry remains. Android 8–12 require a silent minimal notification.
-- **Experimental wheels:** shutter times including 1/200 and 1/400, and ISO 100–12800. Choices are saved only on the phone and explicitly marked **Not sent to cameras**.
+- **Experimental Action 4 exposure:** select shutter time and whole-stop ISO 100–12800, Read cameras, then explicitly Apply to all. Manual mode/shutter/ISO writes require matching camera readback; unsupported queries cause no setting writes.
 
 ## Install or update
 
 **Requirements:** Android 8.0+ (API 26), Bluetooth LE, and supported camera firmware.
 
 1. Stop filming and end the remote session before updating.
-2. Install `DJI-Multi-Remote-0.2.0-preview.apk`. Install over the existing app—**do not uninstall first** if you want to retain saved cameras/settings.
+2. Install `DJI-Multi-Remote-0.3.0-preview.apk`. Install over the existing app—**do not uninstall first** if you want to retain saved cameras/settings.
 3. Open **DJI Multi Remote** and grant Nearby devices permission. On Android 8–11, BLE discovery also requires Location permission and the system Location switch. No notification permission is requested.
 4. Power cameras on, enable Bluetooth, choose Video mode and check memory cards. Disconnect DJI Mimo or other controllers.
 5. **Cameras → Find cameras → Add to group**. Match the pairing code and approve on each camera screen.
 6. Wait for group readiness, then use **Record all** or an individual camera's **Record only this camera** button.
-7. Add the widget from **Settings → Home-Screen Widget**. Remove/re-add older widgets once to adopt the new 4×1 default dimensions.
+7. Add the widget from **Settings → Home-Screen Widget**. Remove/re-add older widgets once to adopt the new 4×2 default dimensions.
 
 Android may ask you to allow APK installation from your file manager. Keep Play Protect enabled and review its warnings; do not disable device-wide security protections.
 
@@ -48,16 +48,18 @@ Some Action 6 firmware emits text-mode status (`1D06`) without numeric recording
 
 Volume/keyboard shutter buttons work **while the app is focused**. Background media keys depend on Android routing and competing media apps. The app does not use an accessibility service, fake audio playback or global key interception. Existing explicit custom/disabled mappings are retained; **Reset to Volume Up** restores the default.
 
-## Experimental shutter / ISO wheels
+## Experimental Action 4 shutter / ISO controls
 
-Enable **Settings → Experimental exposure & ISO → Show global control wheels**. The wheels also appear on the Remote page. Scroll or tap to choose values.
+1. Connect all saved cameras. This first driver allows **Action 4 only**, idle in a video mode, with fresh status. Mixed/offline/recording groups are blocked.
+2. Enable **Settings → Experimental exposure & ISO → Show global control wheels**.
+3. Select the desired shutter speed (for example 1/400) and whole-stop ISO (100, 200, 400, 800, 1600, 3200, 6400, 12800).
+4. Tap **Read cameras**. Every camera must answer both setting getters before Apply becomes available.
+5. Tap **Apply to all** and confirm the change to **manual exposure**. The service reads every camera again before sending any group writes. Each camera receives shutter/ISO setters and, if needed, a manual-mode request, then getter readback.
+6. Check each camera's result. “Camera confirmed” means getter values match the request—not merely that a write or ACK succeeded. A failed setter/readback can leave partial changes; check the camera and use Read again. There is no blind retry or automatic rollback.
 
-- “Exposure” here means **shutter time**, not EV compensation.
-- The selectable ranges are presets, not a capability claim for every camera/frame rate.
-- **No Bluetooth apply/transmit path exists for these settings yet.** The UI and stored values must not be interpreted as camera readback.
-- Concurrent dispatch is feasible, but exact setters, capability queries and readback need validation on one camera, then two. Separate DUML research about ISO *limits* does not establish manual shutter/ISO support in our R-SDK sessions.
+Wheel movements alone do not send settings. Queries that time out or return an unrecognized/rejected response cause **no setting writes**. Some firmware/session combinations may not accept DUML setting queries alongside the R-SDK recording session; this driver does not perform a speculative extra pairing, wake or Wi-Fi handshake. A query failure is not proof that all Bluetooth exposure control is impossible, but this build will not pretend it worked.
 
-See [exposure research and implementation gate](docs/EXPOSURE_RESEARCH.md).
+The wire encodings were cross-checked against DJI Mobile SDK 4.18 class definitions and open protocol research. That does **not** certify Action 4 firmware compatibility: this build still needs a read/apply test on your actual camera. It is not frame-synchronized or atomic across cameras. See [research and wire details](docs/EXPOSURE_RESEARCH.md).
 
 ## Build / IDE
 
@@ -83,7 +85,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## Validation
 
-**78 unit tests pass**, Android lint has **0 errors**, and emulator UI checks cover group/per-camera displays, default key mapping, Settings placement and local wheel selection/persistence. Launcher checks verify 4×1 sizing and separate button/body behavior. Android 16 checks verify the background service without a normal session notification. In-place APK installation and launch on a connected Android phone have been verified.
+**112 unit tests pass**, Android lint has **0 errors**, and emulator UI checks cover group/per-camera displays, default key mapping, Settings placement and wheel selection. DUML tests cover packet CRCs, setter payloads, reply correlation, read-only behavior, readback mismatch and failure handling. Launcher tests verify ready → recording → stopped changes, both controls remaining available, and body taps opening the app. Android 16 checks verify the background service without a normal session notification. In-place installation/launch of the prior 0.2 preview was verified on a connected Android phone. The 0.3 camera-control path has not yet been tested on that phone/camera.
 
 These are not physical-camera acceptance tests. Radio reliability, actual camera commands and multi-camera timing need the [hardware test checklist](docs/HARDWARE_TEST_PLAN.md). UI screenshots with test cameras are simulated fixtures, not evidence of real recording. See [validation details](docs/VALIDATION.md).
 
@@ -99,8 +101,9 @@ These are not physical-camera acceptance tests. Radio reliability, actual camera
 
 ## Release and documentation
 
-Release tag: **`v0.2.0-preview`**. Expected assets: the APK and `SHA256SUMS.txt`. The APK is a **prerelease**; retain the engineering-preview and experimental-control limitations in its release notes.
+Current working preview: **`0.3.0-preview`**. The previously prepared local release remains tagged **`v0.2.0-preview`**; this update does not create or publish a new release. Expected assets: the APK and `SHA256SUMS.txt`. The APK is a **prerelease**; retain the engineering-preview and experimental-control limitations in its release notes.
 
+- [0.3 changes](docs/CHANGELOG-0.3.md)
 - [0.2 changes](docs/CHANGELOG-0.2.md)
 - [Release notes](docs/RELEASE-0.2.0.md)
 - [Architecture and state/safety model](docs/ARCHITECTURE.md)
